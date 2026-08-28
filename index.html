@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500;1,9..144,600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <style>
   :root{
     --paper:#EFE7D3;
@@ -368,15 +369,8 @@
           </label>
         </div>
         <div style="margin-top:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-          <button class="cta-btn" id="submit-btn" onclick="pbActions.startListingPayment()">Continue — ₹9 listing fee</button>
+          <button class="cta-btn" id="submit-btn" onclick="pbActions.startListingPayment()">Pay ₹9 & publish listing</button>
           <span class="status-msg" id="form-status"></span>
-        </div>
-        <div id="fee-panel" class="fee-inline" style="display:none;">
-          <div class="mono" style="font-size:12px;color:var(--ink-soft);">Listing fee: ₹9 — one-time, to publish this entry.</div>
-          <div class="fee-actions">
-            <a class="btn-secondary" id="listing-upi-link" href="#" style="text-decoration:none;" onclick="pbActions.markPayTapped('listing')">Pay ₹9 via UPI</a>
-            <button class="cta-btn" id="listing-confirm-btn" onclick="pbActions.confirmListingPaid()" disabled style="opacity:0.5;">I've paid — publish listing</button>
-          </div>
         </div>
         <p class="form-note">By posting, you agree your contact will be shown to buyers who unlock this entry. The item's price is settled directly between you and the buyer — Pass-book only touches the listing fee.</p>
       </div>
@@ -404,7 +398,7 @@
     setPersistence, browserLocalPersistence, inMemoryPersistence
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import {
-    getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp
+    getFirestore, collection, onSnapshot, query, orderBy
   } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   import {
     getStorage, ref, uploadBytes, getDownloadURL
@@ -419,11 +413,15 @@
     appId: "1:46744217622:web:1c61ac796b1f747759ed37"
   };
 
-  // Platform UPI ID — both the ₹9 listing fee and ₹9 reveal fee land here.
-  const PLATFORM_UPI_ID = "sharmasughandh@ptyes";
-  function buildUpiLink(amount, note){
-    const p = new URLSearchParams({ pa: PLATFORM_UPI_ID, pn:"Pass-book", am:String(amount), cu:"INR", tn: note||"Pass-book fee" });
-    return `upi://pay?${p.toString()}`;
+  async function apiPost(path, body){
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
   }
   function escapeHtml(str){
     if(!str) return "";
@@ -450,10 +448,8 @@
 
   let allListings = [];
   let activeFilter = "all";
-  let pendingListing = null;
   let pendingPhotoBlob = null;
   let currentUser = null;
-  const tappedReveals = new Set();
 
   window.addEventListener('error', (e) => {
     const statusEl = document.getElementById('auth-status');
@@ -523,15 +519,7 @@
       if(l.revealed){
         contactBlock = `<div class="contact-line">${escapeHtml(l.contact || "no contact given")}</div>`;
       }else if(l.unlocking){
-        const tapped = tappedReveals.has(l.id);
-        contactBlock = `
-          <div class="fee-inline">
-            <div class="mono" style="font-size:11px;color:var(--ink-soft);">Pay ₹9 to view this seller's contact.</div>
-            <div class="fee-actions">
-              <a class="reveal-btn" style="text-decoration:none;" href="${buildUpiLink(9, 'Reveal fee - ' + (l.item||''))}" onclick="window.pbActions.markPayTapped('${l.id}')">Pay ₹9 via UPI</a>
-              <button class="reveal-btn" ${tapped ? "" : "disabled style=\"opacity:0.5;\""} onclick="window.pbActions.confirmReveal('${l.id}')">I've paid — show contact</button>
-            </div>
-          </div>`;
+        contactBlock = `<div class="mono" style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Verifying payment…</div>`;
       }
       return `
         <div class="ledger-card" data-id="${l.id}">
@@ -546,7 +534,7 @@
           </div>
           ${contactBlock}
           <div class="action-row">
-            ${l.revealed ? `<span class="stamp-tag">Unlocked</span>` : (l.unlocking ? "" : `<button class="reveal-btn" onclick="window.pbActions.reveal('${l.id}')">Unlock contact — ₹9</button>`)}
+            ${l.revealed ? `<span class="stamp-tag">Unlocked</span>` : (l.unlocking ? "" : `<button class="reveal-btn" onclick="window.pbActions.reveal('${l.id}', '${escapeHtml(l.item||'')}')">Pay ₹9 & unlock contact</button>`)}
           </div>
         </div>`;
     }).join("");
@@ -611,27 +599,61 @@
       document.getElementById('f-photo').value = '';
       document.getElementById('photo-preview-wrap').style.display = 'none';
     },
-    markPayTapped: function(key){
-      if(key === 'listing'){
-        const btn = document.getElementById('listing-confirm-btn');
-        if(btn){ btn.disabled = false; btn.style.opacity = '1'; }
-      }else{
-        tappedReveals.add(key);
-        render();
+    reveal: async function(id, itemName){
+      const item = allListings.find(l => l.id === id);
+      if(!item) return;
+      if(!currentUser){ alert("Please log in first."); return; }
+      if(typeof Razorpay === 'undefined'){ alert("Payment couldn't load — check your connection and try again."); return; }
+
+      let order;
+      try{
+        order = await apiPost('/api/create-order', { amount: 9, note: 'Reveal fee - ' + (itemName || '') });
+      }catch(err){
+        console.error(err);
+        alert("Couldn't start payment. Try again.");
+        return;
       }
+
+      const rzp = new Razorpay({
+        key: order.keyId,
+        amount: order.amount,
+        currency: 'INR',
+        name: 'Pass-book',
+        description: 'Unlock contact — ' + (itemName || ''),
+        order_id: order.orderId,
+        prefill: { email: currentUser.email || '' },
+        theme: { color: '#1B2A4A' },
+        handler: async function(response){
+          item.unlocking = true;
+          render();
+          try{
+            const result = await apiPost('/api/verify-payment', {
+              kind: 'reveal',
+              listingId: id,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature
+            });
+            item.revealed = true;
+            item.unlocking = false;
+            item.contact = result.contact;
+            render();
+          }catch(err){
+            console.error(err);
+            item.unlocking = false;
+            render();
+            alert("Payment succeeded but we couldn't verify it. Contact support with your payment ID: " + response.razorpay_payment_id);
+          }
+        },
+        modal: {
+          ondismiss: function(){ item.unlocking = false; render(); }
+        }
+      });
+      rzp.open();
     },
-    reveal: function(id){
-      const item = allListings.find(l => l.id === id);
-      if(item) item.unlocking = true;
-      render();
-    },
-    confirmReveal: function(id){
-      const item = allListings.find(l => l.id === id);
-      if(item){ item.revealed = true; item.unlocking = false; }
-      render();
-    },
-    startListingPayment: function(){
+    startListingPayment: async function(){
       const statusEl = document.getElementById('form-status');
+      const btn = document.getElementById('submit-btn');
       if(!currentUser){ statusEl.textContent = "Please log in first."; statusEl.className="status-msg err"; return; }
       const name = document.getElementById('f-name').value.trim();
       const year = document.getElementById('f-year').value.trim();
@@ -656,39 +678,75 @@
         statusEl.className = "status-msg err";
         return;
       }
-      pendingListing = { sellerName:name, sellerYear:year, item, category, price: price?Number(price):null, contact, desc, sellerUid: currentUser.uid };
-      statusEl.textContent = ""; statusEl.className = "status-msg";
-      document.getElementById('listing-upi-link').href = buildUpiLink(9, 'Listing fee - ' + item);
-      const confirmBtn = document.getElementById('listing-confirm-btn');
-      confirmBtn.disabled = true; confirmBtn.style.opacity = '0.5';
-      document.getElementById('fee-panel').style.display = 'block';
-    },
-    confirmListingPaid: async function(){
-      if(!pendingListing || !listingsRef) return;
-      const statusEl = document.getElementById('form-status');
-      statusEl.textContent = "Filing entry…"; statusEl.className = "status-msg";
+      if(typeof Razorpay === 'undefined'){
+        statusEl.textContent = "Payment couldn't load — check your connection and try again.";
+        statusEl.className = "status-msg err";
+        return;
+      }
+
+      btn.disabled = true;
+      statusEl.textContent = "Uploading photo…"; statusEl.className = "status-msg";
+
       try{
         let imageUrl = null;
-        if(pendingPhotoBlob && storage && currentUser){
-          statusEl.textContent = "Uploading photo…";
+        if(storage && currentUser){
           const path = `listings/${currentUser.uid}/${Date.now()}.jpg`;
           const fileRef = ref(storage, path);
           await uploadBytes(fileRef, pendingPhotoBlob, { contentType: 'image/jpeg' });
           imageUrl = await getDownloadURL(fileRef);
-          statusEl.textContent = "Filing entry…";
         }
-        await addDoc(listingsRef, { ...pendingListing, imageUrl, createdAt: serverTimestamp() });
-        statusEl.textContent = "Entry added to the ledger."; statusEl.className = "status-msg ok";
-        ['f-name','f-year','f-item','f-price','f-contact','f-desc'].forEach(id => document.getElementById(id).value = "");
-        document.getElementById('f-single-item').checked = false;
-        document.getElementById('fee-panel').style.display = 'none';
-        pbActions.clearPhoto();
-        pendingListing = null;
-        window.pbUI.setAppTab('browse');
+
+        const pendingListing = { sellerName:name, sellerYear:year, item, category, price: price?Number(price):null, contact, desc, imageUrl, sellerUid: currentUser.uid };
+        statusEl.textContent = "Opening payment…";
+
+        const order = await apiPost('/api/create-order', { amount: 9, note: 'Listing fee - ' + item });
+
+        const rzp = new Razorpay({
+          key: order.keyId,
+          amount: order.amount,
+          currency: 'INR',
+          name: 'Pass-book',
+          description: 'Listing fee — ' + item,
+          order_id: order.orderId,
+          prefill: { email: currentUser.email || '' },
+          theme: { color: '#1B2A4A' },
+          handler: async function(response){
+            statusEl.textContent = "Filing entry…";
+            try{
+              await apiPost('/api/verify-payment', {
+                kind: 'listing',
+                listing: pendingListing,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature
+              });
+              statusEl.textContent = "Entry added to the ledger."; statusEl.className = "status-msg ok";
+              ['f-name','f-year','f-item','f-price','f-contact','f-desc'].forEach(id => document.getElementById(id).value = "");
+              document.getElementById('f-single-item').checked = false;
+              pbActions.clearPhoto();
+              btn.disabled = false;
+              window.pbUI.setAppTab('browse');
+            }catch(err){
+              console.error(err);
+              statusEl.textContent = "Payment succeeded but publishing failed. Contact support with payment ID: " + response.razorpay_payment_id;
+              statusEl.className = "status-msg err";
+              btn.disabled = false;
+            }
+          },
+          modal: {
+            ondismiss: function(){
+              statusEl.textContent = "Payment cancelled."; statusEl.className = "status-msg";
+              btn.disabled = false;
+            }
+          }
+        });
+        rzp.open();
+        btn.disabled = false;
       }catch(err){
         console.error(err);
-        statusEl.textContent = "Couldn't save. Check your connection and try again.";
+        statusEl.textContent = "Something went wrong. Try again.";
         statusEl.className = "status-msg err";
+        btn.disabled = false;
       }
     }
   };
