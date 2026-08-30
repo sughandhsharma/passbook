@@ -46,6 +46,7 @@ module.exports = async (req, res) => {
         category: publicFields.category || 'Other',
         price: publicFields.price || null,
         desc: publicFields.desc || '',
+        location: publicFields.location || '',
         imageUrl: publicFields.imageUrl || null,
         sellerUid: publicFields.sellerUid || null,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -54,40 +55,36 @@ module.exports = async (req, res) => {
       res.status(200).json({ success: true, id: docRef.id });
       return;
     }
+
     if (kind === 'reveal') {
       if (!listingId) {
         res.status(400).json({ error: 'Missing listingId' });
         return;
       }
+      const { del } = require('@vercel/blob');
       const listingRef = db.collection('listings').doc(listingId);
+      const listingDoc = await listingRef.get();
       const privateDoc = await listingRef.collection('private').doc('contact').get();
       if (!privateDoc.exists) {
         res.status(404).json({ error: 'No contact found for this listing' });
         return;
       }
       const contact = privateDoc.data().contact;
+      const imageUrl = listingDoc.exists ? listingDoc.data().imageUrl : null;
 
-      // Item claimed — remove the listing for everyone immediately.
-      // Best-effort: if this fails, the buyer still gets their paid-for contact;
-      // the listing can be cleaned up later via Mark as sold.
+      // Item claimed — remove the listing (and its photo) for everyone immediately.
+      // Best-effort: if this fails, the buyer still gets their paid-for contact.
       try {
         await listingRef.collection('private').doc('contact').delete();
         await listingRef.delete();
+        if (imageUrl) {
+          await del(imageUrl).catch((err) => console.error('Blob cleanup failed (non-fatal):', err));
+        }
       } catch (cleanupErr) {
         console.error('Cleanup after reveal failed (non-fatal):', cleanupErr);
       }
 
       res.status(200).json({ success: true, contact });
-      return;
-    }
-
-    
-      const privateDoc = await db.collection('listings').doc(listingId).collection('private').doc('contact').get();
-      if (!privateDoc.exists) {
-        res.status(404).json({ error: 'No contact found for this listing' });
-        return;
-      }
-      res.status(200).json({ success: true, contact: privateDoc.data().contact });
       return;
     }
 
