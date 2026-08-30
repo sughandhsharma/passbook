@@ -365,6 +365,11 @@
           </div>
           <div><label for="f-price">Price (₹)</label><input id="f-price" type="number" min="0" placeholder="e.g. 600" /></div>
           <div><label for="f-contact">Your contact (phone/WhatsApp)</label><input id="f-contact" type="text" placeholder="e.g. 98xxxxxxxx" /></div>
+          <div>
+            <label for="f-location">Meetup area (visible to everyone)</label>
+            <input id="f-location" type="text" placeholder="e.g. Kamla Nagar, Delhi" />
+            <p style="font-size:11.5px;color:var(--ink-soft);margin:5px 0 0;">Give a general area, not your exact address or room number — for your own safety.</p>
+          </div>
           <div class="full"><label for="f-desc">Description (optional)</label><textarea id="f-desc" placeholder="Condition, why you're selling, anything a buyer should know" rows="3"></textarea></div>
           <div class="full">
             <label for="f-photo">Photo — required, so buyers can see the real condition</label>
@@ -515,6 +520,7 @@
       }else{
         window.pbUI && window.pbUI.showLandingIfLoggedOut();
       }
+      render();
     });
   }
 
@@ -533,7 +539,7 @@
     body.innerHTML = filtered.map((l, i) => {
       const sno = String(filtered.length - i).padStart(2,'0');
       const priceLabel = l.price ? `₹${l.price}` : "—";
-      const metaLine = [l.category, l.sellerYear].filter(Boolean).join(" · ");
+      const metaLine = [l.category, l.sellerYear, l.location].filter(Boolean).join(" · ");
       let contactBlock = "";
       if(l.revealed){
         contactBlock = `<div class="contact-line">${escapeHtml(l.contact || "no contact given")}</div>`;
@@ -552,8 +558,9 @@
             <div class="price">${priceLabel}</div>
           </div>
           ${contactBlock}
-          <div class="action-row">
-            ${l.revealed ? `<span class="stamp-tag">Unlocked</span>` : (l.unlocking ? "" : `<button class="reveal-btn" onclick="window.pbActions.reveal('${l.id}', '${escapeHtml(l.item||'')}')">Pay ₹9 & unlock contact</button>`)}
+          <div class="action-row" style="justify-content:space-between;">
+            ${(currentUser && l.sellerUid === currentUser.uid) ? `<button class="reveal-btn" style="border-color:var(--stamp);color:var(--stamp);" onclick="window.pbActions.markSold('${l.id}', '${escapeHtml(l.item||'')}')">Mark as sold — remove listing</button>` : `<span></span>`}
+            ${l.revealed ? `<span class="stamp-tag">Unlocked</span>` : (l.unlocking ? "" : (currentUser && l.sellerUid === currentUser.uid ? "" : `<button class="reveal-btn" onclick="window.pbActions.reveal('${l.id}', '${escapeHtml(l.item||'')}')">Pay ₹9 & unlock contact</button>`))}
           </div>
         </div>`;
     }).join("");
@@ -618,18 +625,33 @@
       document.getElementById('f-photo').value = '';
       document.getElementById('photo-preview-wrap').style.display = 'none';
     },
+    markSold: async function(id, itemName){
+      if(!currentUser) return;
+      if(!confirm(`Mark "${itemName}" as sold? This removes the listing for everyone immediately and can't be undone.`)) return;
+      try{
+        const idToken = await currentUser.getIdToken();
+        await apiPost('/api/mark-sold', { listingId: id, idToken });
+        // No manual DOM update needed — Firestore's realtime listener (onSnapshot)
+        // will fire for every open browser the instant this doc is deleted,
+        // pulling it out of Browse for everyone automatically.
+      }catch(err){
+        console.error(err);
+        alert("Couldn't remove the listing. Try again.");
+      }
+    },
     reveal: async function(id, itemName){
       const item = allListings.find(l => l.id === id);
       if(!item) return;
       if(!currentUser){ alert("Please log in first."); return; }
       if(typeof Razorpay === 'undefined'){ alert("Payment couldn't load — check your connection and try again."); return; }
 
-      let order;
+      let order, idToken;
       try{
-        order = await apiPost('/api/create-order', { amount: 9, note: 'Reveal fee - ' + (itemName || '') });
+        idToken = await currentUser.getIdToken();
+        order = await apiPost('/api/create-order', { amount: 9, note: 'Reveal fee - ' + (itemName || ''), kind: 'reveal', listingId: id, idToken });
       }catch(err){
         console.error(err);
-        alert("Couldn't start payment. Try again.");
+        alert(err.message || "Couldn't start payment. Try again.");
         return;
       }
 
@@ -665,7 +687,11 @@
           }
         },
         modal: {
-          ondismiss: function(){ item.unlocking = false; render(); }
+          ondismiss: function(){
+            item.unlocking = false;
+            render();
+            apiPost('/api/release-lock', { listingId: id, idToken }).catch(() => {});
+          }
         }
       });
       rzp.open();
@@ -681,6 +707,7 @@
       const price = document.getElementById('f-price').value;
       const contact = document.getElementById('f-contact').value.trim();
       const desc = document.getElementById('f-desc').value.trim();
+      const location = document.getElementById('f-location').value.trim();
 
       if(!name || !item || !contact){
         statusEl.textContent = "Fill in your name, the item, and a contact.";
@@ -714,7 +741,7 @@
           imageUrl = uploadResult.url;
         }
 
-        const pendingListing = { sellerName:name, sellerYear:year, item, category, price: price?Number(price):null, contact, desc, imageUrl, sellerUid: currentUser.uid };
+        const pendingListing = { sellerName:name, sellerYear:year, item, category, price: price?Number(price):null, contact, desc, location, imageUrl, sellerUid: currentUser.uid };
         statusEl.textContent = "Opening payment…";
 
         const order = await apiPost('/api/create-order', { amount: 9, note: 'Listing fee - ' + item });
@@ -739,7 +766,7 @@
                 razorpay_signature: response.razorpay_signature
               });
               statusEl.textContent = "Entry added to the ledger."; statusEl.className = "status-msg ok";
-              ['f-name','f-year','f-item','f-price','f-contact','f-desc'].forEach(id => document.getElementById(id).value = "");
+              ['f-name','f-year','f-item','f-price','f-contact','f-desc','f-location'].forEach(id => document.getElementById(id).value = "");
               document.getElementById('f-single-item').checked = false;
               pbActions.clearPhoto();
               btn.disabled = false;
