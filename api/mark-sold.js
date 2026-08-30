@@ -1,4 +1,5 @@
 const admin = require('firebase-admin');
+const { del } = require('@vercel/blob');
 
 if (!admin.apps.length) {
   const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -41,6 +42,9 @@ module.exports = async (req, res) => {
 
     await listingRef.collection('private').doc('contact').delete().catch(() => {});
     await listingRef.delete();
+    if (data.imageUrl) {
+      await del(data.imageUrl).catch((err) => console.error('Blob cleanup failed (non-fatal):', err));
+    }
 
     res.status(200).json({ success: true });
   } catch (err) {
