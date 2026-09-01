@@ -263,7 +263,8 @@
       <h1>What you're<br/>done with,<br/><i>someone else needs.</i></h1>
       <p class="lede">Pass-book is where students anywhere hand off books, cycles, hostel gear and electronics to whoever needs them next.</p>
       <div class="hero-actions">
-        <button class="cta-btn" onclick="pbUI.goToAuth('signup')">Get started — it's free to join</button>
+        <button class="cta-btn" onclick="pbUI.enterApp()">Browse listings</button>
+        <button class="btn-secondary" onclick="pbUI.goToAuth('signup')">Get started — it's free to join</button>
       </div>
 
       <div class="stack-cards">
@@ -329,7 +330,8 @@
     <div class="brand"><div class="brand-mark"><svg viewBox="0 0 40 40" aria-hidden="true"><g transform="rotate(-6 20 20)"><rect x="7" y="5" width="22" height="30" rx="3" fill="#fff" stroke="var(--ink)" stroke-width="1.6"/><line x1="12" y1="5" x2="12" y2="35" stroke="var(--rule)" stroke-width="1.2"/><line x1="16" y1="14" x2="25" y2="14" stroke="var(--rule)" stroke-width="1.2"/><line x1="16" y1="19" x2="25" y2="19" stroke="var(--rule)" stroke-width="1.2"/><line x1="16" y1="24" x2="25" y2="24" stroke="var(--rule)" stroke-width="1.2"/></g><g transform="rotate(10 29 13)"><circle cx="29" cy="13" r="9" fill="none" stroke="var(--stamp)" stroke-width="2"/><text x="29" y="17.5" text-anchor="middle" font-family="Poppins, sans-serif" font-weight="700" font-size="12" fill="var(--stamp)">P</text></g></svg></div><div class="brand-name">Pass<em>-</em>book</div></div>
     <div style="display:flex;align-items:center;gap:12px;">
       <span class="mono" id="user-email-badge" style="font-size:11px;color:var(--ink-soft);"></span>
-      <button id="logout-btn" onclick="pbAuthActions.logout()">Log out</button>
+      <button id="logout-btn" onclick="pbAuthActions.logout()" style="display:none;">Log out</button>
+      <button id="topbar-login-btn" onclick="pbUI.goToAuth('signup')" style="background:none;border:none;font-family:'IBM Plex Mono';font-size:11.5px;color:var(--ink-soft);text-decoration:underline;cursor:pointer;">Log in</button>
     </div>
   </div>
   <div class="app-tabs">
@@ -360,7 +362,14 @@
     <!-- SELL PAGE -->
     <div class="app-page away-right" id="page-sell">
       <div class="section-head"><h2>Make an entry</h2></div>
-      <div class="post-panel">
+
+      <div id="sell-login-gate" class="post-panel" style="text-align:center;">
+        <h3 style="margin-bottom:8px;">Log in to post a listing</h3>
+        <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 16px;">You'll need an account so buyers know who they're dealing with.</p>
+        <button class="cta-btn" onclick="pbUI.goToAuth('signup')">Log in / Sign up</button>
+      </div>
+
+      <div id="sell-form-wrap" class="post-panel" style="display:none;">
         <div class="mono" style="font-size:12px;color:var(--ink-soft);">Filed under your name — visible to anyone who unlocks this entry.</div>
         <div class="form-grid">
           <div><label for="f-name">Your name</label><input id="f-name" type="text" placeholder="e.g. Ananya Sharma" /></div>
@@ -405,7 +414,14 @@
     <!-- ACCOUNT PAGE -->
     <div class="app-page away-right" id="page-account">
       <div class="section-head"><h2>Your account</h2></div>
-      <div class="account-card">
+
+      <div id="account-login-gate" class="account-card" style="text-align:center;">
+        <h3 style="margin-bottom:8px;">Not logged in</h3>
+        <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 16px;">Log in to post listings and unlock sellers' contact info.</p>
+        <button class="cta-btn" onclick="pbUI.goToAuth('signup')">Log in / Sign up</button>
+      </div>
+
+      <div id="account-info-wrap" class="account-card" style="display:none;">
         <div class="mono" style="font-size:12px;color:var(--ink-soft);margin-bottom:4px;">Logged in as</div>
         <div style="font-family:'Poppins';font-weight:600;font-size:17px;" id="account-email">—</div>
         <hr class="rule" style="margin:18px 0;" />
@@ -523,9 +539,8 @@
         document.getElementById('user-email-badge').textContent = user.email || "";
         document.getElementById('account-email').textContent = user.email || "—";
         window.pbUI && window.pbUI.enterApp();
-      }else{
-        window.pbUI && window.pbUI.showLandingIfLoggedOut();
       }
+      window.pbUI && window.pbUI.refreshGates && window.pbUI.refreshGates(!!user);
       render();
     });
   }
@@ -838,6 +853,14 @@
       if(!appLayer.classList.contains('hidden-layer') || !document.getElementById('layer-auth').classList.contains('hidden-layer')){
         this.goToLanding();
       }
+    },
+    refreshGates: function(isLoggedIn){
+      document.getElementById('sell-login-gate').style.display = isLoggedIn ? 'none' : 'block';
+      document.getElementById('sell-form-wrap').style.display = isLoggedIn ? 'block' : 'none';
+      document.getElementById('account-login-gate').style.display = isLoggedIn ? 'none' : 'block';
+      document.getElementById('account-info-wrap').style.display = isLoggedIn ? 'block' : 'none';
+      document.getElementById('logout-btn').style.display = isLoggedIn ? 'inline' : 'none';
+      document.getElementById('topbar-login-btn').style.display = isLoggedIn ? 'none' : 'inline';
     },
     setAppTab: function(name){
       document.querySelectorAll('.app-tab').forEach(t => t.classList.toggle('active', t.dataset.page === name));
