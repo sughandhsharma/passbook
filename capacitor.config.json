@@ -1,0 +1,9 @@
+{
+  "appId": "com.sughandh.relay",
+  "appName": "Relay",
+  "webDir": "www",
+  "server": {
+    "url": "https://passbook-omega.vercel.app",
+    "cleartext": false
+  }
+}

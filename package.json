@@ -3,8 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "razorpay": "^2.9.4",
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/cli": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
+    "@vercel/blob": "latest",
     "firebase-admin": "^12.1.0",
-    "@vercel/blob": "latest"
+    "razorpay": "^2.9.4"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5"
   }
 }
